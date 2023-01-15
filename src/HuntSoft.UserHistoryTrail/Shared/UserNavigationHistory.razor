@@ -1,0 +1,79 @@
+﻿@using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage
+
+@implements IDisposable
+
+<h3>UserHistory</h3>
+
+<ul class="list-group">
+    @foreach (var userHistoryTrailItem in _userHistoryTrail.TakeLast(10))
+    {
+        <li class="list-group-item">
+            @userHistoryTrailItem
+        </li>
+    }
+</ul>
+
+@code {
+
+    private List<string> _userHistoryTrail = new(10);
+
+    //private HashSet<string> UniqueHistory => _userHistoryTrail.ToHashSet();
+
+    [Inject]
+    private NavigationManager NavigationManager { get; init; } = default!;
+
+    [Inject]
+    private ProtectedLocalStorage ProtectedLocalStorage { get; init; } = default!;
+
+    protected override void OnInitialized()
+    {
+        NavigationManager.LocationChanged += NavigationManagerOnLocationChanged;
+
+        base.OnInitialized();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            var storageResult = await ProtectedLocalStorage.GetAsync<List<string>>(nameof(UserNavigationHistory)); // Attempt retrieving any stored user history in their browser
+
+            if (storageResult.Success) // If we were successful at retrieving a local storage value
+            {
+                _userHistoryTrail = storageResult.Value!; // I know Value! is not null
+            }
+
+            var currentUri = NavigationManager.Uri; // Get current URI from NavigationManager
+
+            AddCurrentUri(currentUri);
+
+            await ProtectedLocalStorage.SetAsync(nameof(UserNavigationHistory), _userHistoryTrail); // Save the history trail to browser storage before they navigate away (can also save to the server if preferred but for simplicity sake, browser local storage)
+        }
+    }
+
+    private void AddCurrentUri(string currentUri)
+    {
+        var lastItem = _userHistoryTrail.LastOrDefault();
+
+        if (lastItem == null && !string.IsNullOrWhiteSpace(currentUri)) // Protects against adding refreshes on the same page
+        {
+            _userHistoryTrail.Add(currentUri); // Add it to our user history trail list
+        }
+        else if (lastItem != null && lastItem != currentUri) // Add the new page if it wasn't added last
+        {
+            _userHistoryTrail.Add(currentUri);
+        }
+
+        StateHasChanged(); // Because we are using LocalStorage within OnAfterRenderAsync we need to inform state has changed due list being filled from storage (server side implementation would be different because we can utilize OnInitialized to retrieve data and have it rendered right away)
+    }
+
+    private void NavigationManagerOnLocationChanged(object? sender, LocationChangedEventArgs locationChangedEventArgs) // Now that our component is static through all pages
+    {
+        AddCurrentUri(locationChangedEventArgs.Location);
+    }
+
+    public void Dispose()
+    {
+        NavigationManager.LocationChanged -= NavigationManagerOnLocationChanged;
+    }
+}
